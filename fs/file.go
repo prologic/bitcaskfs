@@ -7,6 +7,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/prologic/bitcask"
 	"github.com/sirupsen/logrus"
 )
 
@@ -24,14 +25,14 @@ func (n *Node) resizeUnlocked(sz uint64) {
 // Open gets value from Bitcask, and saves it in "content" for later read
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	if n.content == nil {
-		if val, err := n.db.Get([]byte(n.path)); err != nil {
+		val, err := n.db.Get([]byte(n.path))
+		if err != nil && err != bitcask.ErrKeyNotFound {
 			logrus.WithError(err).WithField("path", n.path).Errorf("Failed to get value from Bitcask")
 			return nil, 0, syscall.EIO
-		} else {
-			n.rwMu.Lock()
-			n.content = val
-			n.rwMu.Unlock()
 		}
+		n.rwMu.Lock()
+		n.content = val
+		n.rwMu.Unlock()
 	}
 	logrus.WithField("path", n.path).WithField("length", len(n.content)).Debug("Node Open")
 	return n, fuse.FOPEN_DIRECT_IO, fs.OK
