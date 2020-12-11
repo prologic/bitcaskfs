@@ -72,8 +72,10 @@ func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		}
 		return nil
 	})
-	logrus.WithError(err).WithField("path", parent).Errorf("Failed to list keys from Bitcask")
-	return nil, syscall.EIO
+	if err != nil {
+		logrus.WithError(err).WithField("path", parent).Errorf("Failed to list keys from Bitcask")
+		return nil, syscall.EIO
+	}
 
 	entries := make([]fuse.DirEntry, 0, len(entrySet))
 	for _, e := range entrySet {
