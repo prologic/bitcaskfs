@@ -2,7 +2,7 @@
 
 A FUSE filesystem for the [Bitcask](https://github.com/prologic/bitcask) database.
 
-> Inspired by [etcfs](https://github.com/polyrabbit/etcdfs).
+> Inspired by [etcdfs](https://github.com/polyrabbit/etcdfs).
 
 ## Getting Started
 
