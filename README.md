@@ -15,7 +15,7 @@ go get github.com/prologic/bitcaskfs
 Mount a Bitcask database:
 
 ```#!console
-bitcaskfs -; /path/to/db /path/to/mount
+bitcaskfs -p /path/to/db /path/to/mount
 ```
 
 ## License
