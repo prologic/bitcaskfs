@@ -100,6 +100,10 @@ func (n *Node) resolve(fileName string) string {
 // Mkdir implements the NodeMkdirer interface and the `mkdir` operation.
 func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	fullPath := n.resolve(name)
+	if !strings.HasSuffix(fullPath, "/") {
+		fullPath += "/"
+	}
+
 	logrus.WithField("path", fullPath).Debug("Node Mkdir")
 
 	if err := n.db.Put([]byte(fullPath), []byte{}); err != nil {
