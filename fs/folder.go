@@ -97,6 +97,24 @@ func (n *Node) resolve(fileName string) string {
 	return n.path + string(filepath.Separator) + fileName
 }
 
+// Mkdir implements the NodeMkdirer interface and the `mkdir` operation.
+func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fullPath := n.resolve(name)
+	logrus.WithField("path", fullPath).Debug("Node Mkdir")
+
+	if err := n.db.Put([]byte(fullPath), []byte{}); err != nil {
+		logrus.WithError(err).WithField("path", fullPath).Errorf("Failed to write keys to Bitcask")
+		return nil, syscall.EIO
+	}
+
+	child := Node{
+		path: fullPath,
+		db:   n.db,
+	}
+
+	return n.NewInode(ctx, &child, fs.StableAttr{Mode: child.getMode(child.isLeaf), Ino: n.inodeHash(child.path)}), fs.OK
+}
+
 // Lookup finds a file under the current node(directory)
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	fullPath := n.resolve(name)
@@ -156,6 +174,7 @@ func (n *Node) inodeHash(path string) uint64 {
 }
 
 var (
+	_ fs.NodeMkdirer   = &Node{}
 	_ fs.NodeGetattrer = &Node{}
 	_ fs.NodeReaddirer = &Node{}
 	_ fs.NodeLookuper  = &Node{}
