@@ -13,8 +13,10 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/prologic/bitcask"
 	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
+
+	"github.com/prologic/bitcaskfs/store"
 )
 
 // Set file owners to the current user,
@@ -35,7 +37,8 @@ func init() {
 // A tree node in filesystem, it acts as both a directory and file
 type Node struct {
 	fs.Inode
-	db     *bitcask.Bitcask
+	store store.Store
+
 	isLeaf bool   // A leaf of the filesystem tree means it's a file
 	path   string // File path to get to the current file
 
@@ -44,37 +47,36 @@ type Node struct {
 }
 
 // NewRoot returns a file node - acting as a root, with inode sets to 1 and leaf sets to false
-func NewRoot(db *bitcask.Bitcask) *Node {
+func NewRoot(store store.Store) *Node {
 	return &Node{
-		db:     db,
+		store:  store,
 		isLeaf: false,
 	}
 }
 
-// List keys under a certain prefix from Bitcask, and output the next hierarchy level
+// List keys under a certain prefix from the store, and output the next hierarchy level
 func (n *Node) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	parent := n.resolve("")
-	logrus.WithField("path", parent).Debug("Node Readdir")
+	log.WithField("path", parent).Debug("Node Readdir")
 
 	entrySet := make(map[string]fuse.DirEntry)
 
-	var lastName string
-	err := n.db.Scan([]byte(parent), func(key []byte) error {
-		nextLevel, hasMore := n.nextHierarchyLevel(string(key), parent)
-		lastName = nextLevel
+	keys, err := n.store.ListKeys(ctx, parent)
+	if err != nil {
+		log.WithError(err).WithField("path", parent).Errorf("Failed to list keys from store")
+		return nil, syscall.EIO
+	}
+
+	for _, key := range keys {
+		nextLevel, hasMore := n.nextHierarchyLevel(key, parent)
 		if _, exist := entrySet[nextLevel]; exist {
-			return nil
+			continue
 		}
 		entrySet[nextLevel] = fuse.DirEntry{
 			Mode: n.getMode(!hasMore),
 			Name: nextLevel,
 			Ino:  n.inodeHash(nextLevel),
 		}
-		return nil
-	})
-	if err != nil {
-		logrus.WithError(err).WithField("path", parent).Errorf("Failed to list keys from Bitcask")
-		return nil, syscall.EIO
 	}
 
 	entries := make([]fuse.DirEntry, 0, len(entrySet))
@@ -106,14 +108,14 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 
 	logrus.WithField("path", fullPath).Debug("Node Mkdir")
 
-	if err := n.db.Put([]byte(fullPath), []byte{}); err != nil {
+	if err := n.store.PutValue(ctx, fullPath, []byte{}); err != nil {
 		logrus.WithError(err).WithField("path", fullPath).Errorf("Failed to write keys to Bitcask")
 		return nil, syscall.EIO
 	}
 
 	child := Node{
-		path: fullPath,
-		db:   n.db,
+		path:  fullPath,
+		store: n.store,
 	}
 
 	return n.NewInode(ctx, &child, fs.StableAttr{Mode: child.getMode(child.isLeaf), Ino: n.inodeHash(child.path)}), fs.OK
@@ -122,13 +124,10 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 // Lookup finds a file under the current node(directory)
 func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	fullPath := n.resolve(name)
-	logrus.WithField("path", fullPath).Debug("Node Lookup")
-	var keys []string
-	if err := n.db.Scan([]byte(fullPath), func(key []byte) error {
-		keys = append(keys, string(key))
-		return nil
-	}); err != nil {
-		logrus.WithError(err).WithField("path", fullPath).Errorf("Failed to list keys from Bitcask")
+	log.WithField("path", fullPath).Debug("Node Lookup")
+	keys, err := n.store.ListKeys(ctx, fullPath)
+	if err != nil {
+		log.WithError(err).WithField("path", fullPath).Errorf("Failed to list keys from store")
 		return nil, syscall.EIO
 	}
 	if len(keys) == 0 {
@@ -136,8 +135,8 @@ func (n *Node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs
 	}
 	key := keys[0]
 	child := Node{
-		path: fullPath,
-		db:   n.db,
+		path:  fullPath,
+		store: n.store,
 	}
 	if key == fullPath {
 		child.isLeaf = true

@@ -4,30 +4,32 @@ import (
 	_ "net/http/pprof"
 	"path/filepath"
 
-	"github.com/prologic/bitcask"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/prologic/bitcaskfs/config"
 	"github.com/prologic/bitcaskfs/fs"
+	"github.com/prologic/bitcaskfs/store"
 )
 
 func main() {
 	if !config.Execute() {
 		return
 	}
-	db, err := bitcask.Open(config.DBPath)
+
+	store, err := store.NewBitcaskStore(config.DBPath)
 	if err != nil {
-		log.WithError(err).Fatal("error opening database")
-	}
-	defer db.Close()
-	mountPoint, err := filepath.Abs(config.MountPoint)
-	if err != nil {
-		logrus.WithError(err).WithField("mountPoint", mountPoint).Fatal("Failed to get abs file path")
+		log.WithError(err).Fatal("error creating store")
 		return
 	}
-	server := fs.MustMount(mountPoint, db)
+	defer store.Close()
+
+	mountPoint, err := filepath.Abs(config.MountPoint)
+	if err != nil {
+		log.WithError(err).WithField("mountPoint", mountPoint).Fatal("Failed to get abs file path")
+		return
+	}
+	server := fs.MustMount(mountPoint, store)
 	go server.ListenForUnmount()
-	logrus.Infof("Mounted to %q, use ctrl+c to terminate.", mountPoint)
+	log.Infof("Mounted to %q, use ctrl+c to terminate.", mountPoint)
 	server.Wait()
 }

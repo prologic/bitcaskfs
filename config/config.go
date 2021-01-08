@@ -16,9 +16,10 @@ const (
 var (
 	MountPoint   string
 	MountOptions []string
-	DBPath       string
 	Verbose      bool
 	EnablePprof  bool
+
+	DBPath string
 
 	// Will be set by go-build
 	Version string
@@ -28,7 +29,7 @@ var (
 var (
 	rootCmd = &cobra.Command{
 		Use:   fmt.Sprintf("%s [mount-point]", os.Args[0]),
-		Short: "Mount bitcask DB to local file system - find help/update at https://github.com/prologic/bitcaskfs",
+		Short: "Mount Bitcask DB to local file system - find help/update at https://github.com/prologic/bitcaskfs",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return cmd.Help()
@@ -64,6 +65,9 @@ func Execute() bool {
 		return false
 	}
 	if len(MountPoint) == 0 {
+		return false
+	}
+	if DBPath == "" {
 		return false
 	}
 

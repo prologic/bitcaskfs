@@ -8,9 +8,10 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/prologic/bitcask"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/prologic/bitcaskfs/config"
-	"github.com/sirupsen/logrus"
+	"github.com/prologic/bitcaskfs/store"
 )
 
 type Server struct {
@@ -21,7 +22,7 @@ type Server struct {
 // 200ms is enough for an operation to complete
 var cacheDuration = 200 * time.Millisecond
 
-func MustMount(mountPoint string, db *bitcask.Bitcask) *Server {
+func MustMount(mountPoint string, store store.Store) *Server {
 	opts := &fs.Options{
 		AttrTimeout:  &cacheDuration,
 		EntryTimeout: &cacheDuration,
@@ -31,9 +32,9 @@ func MustMount(mountPoint string, db *bitcask.Bitcask) *Server {
 			FsName:  "bitcaskfs",
 		},
 	}
-	server, err := fs.Mount(mountPoint, NewRoot(db), opts)
+	server, err := fs.Mount(mountPoint, NewRoot(store), opts)
 	if err != nil {
-		logrus.WithError(err).Fatal("Failed to mount")
+		log.WithError(err).Fatal("Failed to mount")
 		return nil
 	}
 	return &Server{
@@ -46,12 +47,12 @@ func (s *Server) ListenForUnmount() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-c
-	logrus.Infof("Got %s signal, unmounting %q...", sig, s.mountPoint)
+	log.Infof("Got %s signal, unmounting %q...", sig, s.mountPoint)
 	err := s.Unmount()
 	if err != nil {
-		logrus.WithError(err).Errorf("Failed to unmount, try %q manually.", "umount "+s.mountPoint)
+		log.WithError(err).Errorf("Failed to unmount, try %q manually.", "umount "+s.mountPoint)
 	}
 	<-c // Double ctrl+c
-	logrus.Warn("Force exiting...")
+	log.Warn("Force exiting...")
 	os.Exit(1)
 }

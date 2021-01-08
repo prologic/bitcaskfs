@@ -7,8 +7,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/prologic/bitcask"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 // Callers should have lock held
@@ -22,19 +21,19 @@ func (n *Node) resizeUnlocked(sz uint64) {
 	}
 }
 
-// Open gets value from Bitcask, and saves it in "content" for later read
+// Open gets value from store, and saves it in "content" for later read
 func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	if n.content == nil {
-		val, err := n.db.Get([]byte(n.path))
-		if err != nil && err != bitcask.ErrKeyNotFound {
-			logrus.WithError(err).WithField("path", n.path).Errorf("Failed to get value from Bitcask")
+		if rc, err := n.store.GetValue(ctx, n.path); err != nil {
+			log.WithError(err).WithField("path", n.path).Errorf("Failed to get value from store")
 			return nil, 0, syscall.EIO
+		} else {
+			n.rwMu.Lock()
+			n.content = rc
+			n.rwMu.Unlock()
 		}
-		n.rwMu.Lock()
-		n.content = val
-		n.rwMu.Unlock()
 	}
-	logrus.WithField("path", n.path).WithField("length", len(n.content)).Debug("Node Open")
+	log.WithField("path", n.path).WithField("length", len(n.content)).Debug("Node Open")
 	return n, fuse.FOPEN_DIRECT_IO, fs.OK
 }
 
@@ -42,7 +41,7 @@ func (n *Node) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFl
 func (n *Node) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	n.rwMu.RLock()
 	defer n.rwMu.RUnlock()
-	logrus.WithField("path", n.path).Debug("Node Read")
+	log.WithField("path", n.path).Debug("Node Read")
 
 	end := int(off) + len(dest)
 	if end > len(n.content) {
@@ -57,7 +56,7 @@ func (n *Node) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResul
 func (n *Node) Write(ctx context.Context, fh fs.FileHandle, buf []byte, off int64) (uint32, syscall.Errno) {
 	n.rwMu.Lock()
 	defer n.rwMu.Unlock()
-	logrus.WithField("path", n.path).WithField("length", len(buf)).Debug("Node Write")
+	log.WithField("path", n.path).WithField("length", len(buf)).Debug("Node Write")
 	sz := int64(len(buf))
 	if off+sz > int64(len(n.content)) {
 		n.resizeUnlocked(uint64(off + sz))
@@ -66,26 +65,26 @@ func (n *Node) Write(ctx context.Context, fh fs.FileHandle, buf []byte, off int6
 	return uint32(sz), 0
 }
 
-// Create actually writes an empty value into Bitcask (as a placeholder)
+// Create actually writes an empty value into the store (as a placeholder)
 func (n *Node) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (*fs.Inode, fs.FileHandle, uint32, syscall.Errno) {
 	fullPath := filepath.Join(n.path, string(filepath.Separator), name)
-	logrus.WithField("path", fullPath).Debug("Node Create")
+	log.WithField("path", fullPath).Debug("Node Create")
 	child := Node{
 		path:   fullPath,
-		db:     n.db,
+		store:  n.store,
 		isLeaf: true,
 	}
 	_, err := child.Write(ctx, nil, []byte{}, 0)
 	return n.NewInode(ctx, &child, fs.StableAttr{Mode: child.getMode(child.isLeaf), Ino: n.inodeHash(child.path)}), nil, 0, err
 }
 
-// Flush puts file content into Bitcask
+// Flush puts file content into store
 func (n *Node) Flush(ctx context.Context, fh fs.FileHandle) syscall.Errno {
-	logrus.WithField("path", n.path).Debug("Node Flush")
+	log.WithField("path", n.path).Debug("Node Flush")
 	n.rwMu.RLock()
 	defer n.rwMu.RUnlock()
-	if err := n.db.Put([]byte(n.path), n.content); err != nil {
-		logrus.WithError(err).WithField("path", n.path).Errorf("Failed to put value into Bitcask")
+	if err := n.store.PutValue(ctx, n.path, n.content); err != nil {
+		log.WithError(err).WithField("path", n.path).Errorf("Failed to put value into store")
 		return syscall.EIO
 	}
 	return fs.OK
@@ -93,16 +92,16 @@ func (n *Node) Flush(ctx context.Context, fh fs.FileHandle) syscall.Errno {
 
 // Some editors (eg. Vim) need to call Fsync, so implement it here as a no-op
 func (n *Node) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
-	logrus.WithField("path", n.path).Debug("Node Fsync")
+	log.WithField("path", n.path).Debug("Node Fsync")
 	return fs.OK
 }
 
-// Unlink removes a key from Bitcask
+// Unlink removes a key from the store
 func (n *Node) Unlink(ctx context.Context, name string) syscall.Errno {
 	fullPath := filepath.Join(n.path, string(filepath.Separator), name)
-	logrus.WithField("path", fullPath).Debug("Node Unlink")
-	if err := n.db.Delete([]byte(fullPath)); err != nil {
-		logrus.WithError(err).WithField("path", fullPath).Errorf("Failed to delete key from Bitcask")
+	log.WithField("path", fullPath).Debug("Node Unlink")
+	if err := n.store.DeleteKey(ctx, fullPath); err != nil {
+		log.WithError(err).WithField("path", fullPath).Errorf("Failed to delete key from store")
 		return syscall.EIO
 	}
 	return fs.OK
