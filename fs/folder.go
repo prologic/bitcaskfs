@@ -13,7 +13,6 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/prologic/bitcaskfs/store"
@@ -106,10 +105,8 @@ func (n *Node) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.En
 		fullPath += "/"
 	}
 
-	logrus.WithField("path", fullPath).Debug("Node Mkdir")
-
 	if err := n.store.PutValue(ctx, fullPath, []byte{}); err != nil {
-		logrus.WithError(err).WithField("path", fullPath).Errorf("Failed to write keys to Bitcask")
+		log.WithError(err).WithField("path", fullPath).Errorf("Failed to write keys to Bitcask")
 		return nil, syscall.EIO
 	}
 
